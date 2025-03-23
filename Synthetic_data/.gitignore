@@ -1,0 +1,11 @@
+# Ignore PyBaMM output files
+*.pkl
+
+# Ignore Python cache and virtual environments
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Ignore PyCharm project files
+.idea/
