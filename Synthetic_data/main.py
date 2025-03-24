@@ -13,6 +13,22 @@ start_time_total = time.perf_counter()
 # Print PyBaMM version
 print(f"PyBaMM version: {pybamm.__version__}")
 
+# ---------------- FUNCTION ------------------------
+def lambda_pos(T):
+    """
+    Thermal conductivity of the positive electrode as a function of temperature T (in Kelvin).
+    Equation (S53): lambda_pos = 2.063e-5 * T^2 - 0.01127 * T + 2.331
+    Returns thermal conductivity in W/m.K.
+    """
+    return 2.063e-5 * T**2 - 0.01127 * T + 2.331
+
+def lambda_neg(T):
+    """
+    Thermal conductivity of the negative electrode as a function of temperature T (in Kelvin).
+    Equation (S54): lambda_neg = -2.61e-4 * T^2 + 0.1726 * T - 24.49
+    Returns thermal conductivity in W/m.K.
+    """
+    return -2.61e-4 * T**2 + 0.1726 * T - 24.49
 
 # Function to update parameters
 def update_parameters(param_values, new_values, verbose=True):
@@ -34,52 +50,83 @@ def update_parameters(param_values, new_values, verbose=True):
             if verbose:
                 print(f"Updated '{param_name}': {old_value} -> {new_value}")
         else:
-            param_values[param_name] = new_value
+            # Use update with check_already_exists=False to add new parameters
+            param_values.update({param_name: new_value}, check_already_exists=False)
             if verbose:
                 print(f"Added new parameter '{param_name}': {new_value}")
     return param_values
-
 
 # ------------- Initialization --------------------------
 
 # Load parameter values for Experiment 1 (298.15 K)
 parameter_values_ORegan = pybamm.ParameterValues("ORegan2022")
-
-# Load OKane2022 parameters to use for missing parameters
 parameter_values_okane = pybamm.ParameterValues("OKane2022")
-
-# Combine the parameter sets
 combined_dict = {**parameter_values_okane, **parameter_values_ORegan}
 combined_parameters = pybamm.ParameterValues(combined_dict)
 parameter_values_298 = combined_parameters
 
-'''
-# Define custom parameter updates
+# Define thermal conductivity as temperature-dependent functions
+parameter_values_298["Positive electrode thermal conductivity [W.m-1.K-1]"] = pybamm.FunctionParameter(
+    "Positive electrode thermal conductivity [W.m-1.K-1]",
+    {"Temperature [K]": pybamm.InputParameter("Temperature [K]")},
+    lambda_pos
+)
+
+parameter_values_298["Negative electrode thermal conductivity [W.m-1.K-1]"] = pybamm.FunctionParameter(
+    "Negative electrode thermal conductivity [W.m-1.K-1]",
+    {"Temperature [K]": pybamm.InputParameter("Temperature [K]")},
+    lambda_neg
+)
+
+# Define custom parameter updates from the tables
 custom_parameters = {
-    #SEI Param
-    "SEI lithium interstitial diffusivity [m2.s-1]": 9.81e-19,  # Update capacity to 5.5 A.h
-    "SEI partial molar volume [m3.mol-1]": 5.22e-5,  # Update initial temperature to 300 K
-    "SEI growth activation energy [J.mol-1]": 5e3,   # Update thickness to 0.00012 m
+    # Previous parameters (from the first table)
+    # SEI Parameters
+    "Ratio of lithium moles to SEI moles": 2,
+    "Lithium interstitial reference concentration [mol.m-3]": 15,
+    "SEI resistivity [Ohm.m]": 2e5,
+    "Inner SEI proportion": 0.5,
+    "Initial inner SEI thickness [m]": 1.23625e-08,
+    "Initial outer SEI thickness [m]": 1.23625e-08,
+    "Initial concentration in electrolyte [mol.m-3]": 1000,  # Li⁺ concentration
+    "Initial EC concentration in electrolyte [mol.m-3]": 4541,
 
-    #Lithium plating
-    "Dead lithium decay constant [s-1]": 1e-7,
-    "Lithium plating kinetic rate constant [m.s-1]": 1e-10,
+    # Solvent Consumption Parameters
+    "EC partial molar volume [m3.mol-1]": 6.667e-5,
 
-    #LAM
-    "Positive electrode LAM constant proportional term [s-1]": 2.98e-18,
-    "Negative electrode LAM constant proportional term [s-1]": 2.84e-9,
-    "Negative electrode cracking rate": 5.29e-25,
+    # Lithium Plating Parameters
+    "Lithium plating transfer coefficient": 0.65,
+    "Initial plated lithium concentration [mol.m-3]": 0,
+    "Lithium metal partial molar volume [m3.mol-1]": 1.3e-5,
 
-    #DFN model
+    # New parameters from Table S7
+    # LAM Model Parameters
+    "Positive electrode LAM constant exponential term": 2,
+    "Negative electrode LAM constant exponential term": 2,
+    "Positive electrode stress intensity factor correction": 1.12,
+    "Negative electrode stress intensity factor correction": 1.12,
 
+    # Mechanical and Cracking Parameters
+    "Positive electrode Paris' law exponent m_cr": 2.2,
+    "Negative electrode Paris' law exponent m_cr": 2.2,
+    "Positive electrode number of cracks per unit area [m-2]": 3.18e15,
+    "Negative electrode number of cracks per unit area [m-2]": 3.18e15,
+    "Positive electrode initial crack length [m]": 2e-08,
+    "Negative electrode initial crack length [m]": 2e-08,
+    "Positive electrode initial crack width [m]": 1.5e-08,
+    "Negative electrode initial crack width [m]": 1.5e-08,
+    "Positive electrode critical stress [Pa]": 375e6,  # Convert MPa to Pa
+    "Negative electrode critical stress [Pa]": 60e6,  # Convert MPa to Pa
 }
 
-# Apply the updates
+# Apply the updates from the tables
 parameter_values_298 = update_parameters(parameter_values_298, custom_parameters)
-parameter_values_298.update({'Negative electrode diffusivity activation energy [J.mol-1]': 2e4}, check_already_exists=False)
-'''
 
-# Define the model for partially reversible lithium plating
+# Additional parameter update you had
+parameter_values_298.update({"Lithium plating kinetic rate constant [m.s-1]": 5e-11})
+
+# -------------------- MODEL ---------------------
+# Define the model for irreversible lithium plating
 model_partially_reversible = pb.lithium_ion.DFN(options={
     "SEI": "interstitial-diffusion limited",
     "SEI porosity change": "true",
@@ -103,25 +150,21 @@ var_pts = {
 #-------------------------- Experiment --------------------------
 
 # Define the experiment: Cycling at 298.15 K
-cycle_number = 10
+cycle_number = 300
 experiment_298 = pybamm.Experiment(
-[
+    [
         "Hold at 4.4 V until C/100 (5 minute period)",
         "Rest for 4 hours (5 minute period)",
         "Discharge at 0.1C until 2.5 V (5 minute period)",  # initial capacity check
         "Charge at 0.3C until 4.4 V (5 minute period)",
         "Hold at 4.4 V until C/100 (5 minute period)",
-    ]
-    + [
+    ] + [
         (
-            "Discharge at 1C until 2.5 V",  # ageing cycles 2C discharge
+            "Discharge at 0.5C until 2.5 V",  # ageing cycles 2C discharge
             "Charge at 0.3C until 4.4 V (5 minute period)",
             "Hold at 4.4 V until C/100 (5 minute period)",
         )
-    ]
-    * cycle_number
-    + ["Discharge at 0.1C until 2.5 V (5 minute period)"],  # final capacity check
-   # termination="80% capacity",
+    ] * cycle_number + ["Discharge at 0.1C until 2.5 V (5 minute period)"],  # final capacity check
 )
 
 # Create a progress bar callback
@@ -156,10 +199,10 @@ class ProgressCallback(pybamm.callbacks.Callback):
 total_steps = 5 + (3 * cycle_number) + 1
 
 # Create and solve simulation
-solver = pybamm.IDAKLUSolver()
+solver = pybamm.IDAKLUSolver()  # Using CasadiSolver for stability
 
-# Simulation for Partially Reversible model
-callback_pr = ProgressCallback(total_steps, "Partially Reversible")
+# Simulation for Irreversible model
+callback_pr = ProgressCallback(total_steps, "Irreversible")
 sim_298_pr = pb.Simulation(model_partially_reversible, parameter_values=parameter_values_298, experiment=experiment_298, solver=solver, var_pts=var_pts)
 
 # Measure the time for the simulation
@@ -167,7 +210,7 @@ start_time_simulation = time.perf_counter()
 try:
     solution_298_pr = sim_298_pr.solve(callbacks=[callback_pr])
 except Exception as e:
-    print(f"Simulation failed for Partially Reversible model with error: {e}")
+    print(f"Simulation failed for Irreversible model with error: {e}")
     raise
 end_time_simulation = time.perf_counter()
 simulation_time = end_time_simulation - start_time_simulation
@@ -184,7 +227,7 @@ try:
     capacity_lost_side_reactions_298_pr = solution_298_pr["Total capacity lost to side reactions [A.h]"].entries
 except KeyError as e:
     print(f"Error extracting variable: {e}")
-    print("Available variables in Partially Reversible solution:")
+    print("Available variables in Irreversible solution:")
     print(list(solution_298_pr.variables.keys()))
     raise
 
@@ -230,7 +273,7 @@ plt.legend()
 
 # Plot Capacity Lost to Side Reactions vs Time (in Percentage)
 plt.subplot(2, 2, 4)
-plt.plot(time_298_pr_hours, capacity_lost_side_reactions_percent, label="Capacity Lost [%] ", color="red")
+plt.plot(time_298_pr_hours, capacity_lost_side_reactions_percent, label="Capacity Lost [%]", color="red")
 plt.xlabel("Time [hours]")
 plt.ylabel("Capacity Lost [%]")
 plt.title("Capacity Loss due to Side Reactions vs Time")
@@ -240,10 +283,11 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-solution_298_pr.save("1C_298K.pkl")
-print("Simulation solution saved to 'partially_reversible_solution.pkl'")
+# Save the solution
+solution_298_pr.save("0_5C_298K.pkl")
+print("Simulation solution saved to '4C_298K.pkl'")
+
 # Record the end time for the entire script and calculate total time
 end_time_total = time.perf_counter()
 total_time = end_time_total - start_time_total
 print(f"\nTotal execution time: {total_time:.2f} seconds ({total_time/60:.2f} minutes).")
-
