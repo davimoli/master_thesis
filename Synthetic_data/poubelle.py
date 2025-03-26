@@ -1,49 +1,23 @@
 # M. David Synthetic data generation March 2025
-
 import pybamm
 import pybamm as pb
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm import tqdm  # Import tqdm for progress bar
-import time  # Import time for measuring execution time
-import re  # Import re for regular expressions
+from tqdm import tqdm
+import time
+import re
+
 print(f"PyBaMM version: {pybamm.__version__}")
-# Record the start time for the entire script
 start_time_total = time.perf_counter()
-
-# Print PyBaMM version
-
 
 # ---------------- FUNCTION ------------------------
 def lambda_pos(T):
-    """
-    Thermal conductivity of the positive electrode as a function of temperature T (in Kelvin).
-    Equation (S53): lambda_pos = 2.063e-5 * T^2 - 0.01127 * T + 2.331
-    Returns thermal conductivity in W/m.K.
-    """
-    return 2.063e-5 * T**2 - 0.01127 * T + 2.331
+    return 2.063e-5 * T ** 2 - 0.01127 * T + 2.331
 
 def lambda_neg(T):
-    """
-    Thermal conductivity of the negative electrode as a function of temperature T (in Kelvin).
-    Equation (S54): lambda_neg = -2.61e-4 * T^2 + 0.1726 * T - 24.49
-    Returns thermal conductivity in W/m.K.
-    """
-    return -2.61e-4 * T**2 + 0.1726 * T - 24.49
+    return -2.61e-4 * T ** 2 + 0.1726 * T - 24.49
 
-# Function to update parameters
 def update_parameters(param_values, new_values, verbose=True):
-    """
-    Update parameter values in a PyBaMM ParameterValues object.
-
-    Args:
-        param_values (pybamm.ParameterValues): The ParameterValues object to update.
-        new_values (dict): Dictionary of parameter names (keys) and new values (values).
-        verbose (bool): If True, print the updated values for verification.
-
-    Returns:
-        pybamm.ParameterValues: The updated ParameterValues object (though it’s modified in-place).
-    """
     for param_name, new_value in new_values.items():
         if param_name in param_values:
             old_value = param_values[param_name]
@@ -51,63 +25,47 @@ def update_parameters(param_values, new_values, verbose=True):
             if verbose:
                 print(f"Updated '{param_name}': {old_value} -> {new_value}")
         else:
-            # Use update with check_already_exists=False to add new parameters
             param_values.update({param_name: new_value}, check_already_exists=False)
             if verbose:
                 print(f"Added new parameter '{param_name}': {new_value}")
     return param_values
 
 # ------------- Initialization --------------------------
-
-# Load parameter values for Experiment 1 (298.15 K)
+eps = 1e-2
 parameter_values_ORegan = pybamm.ParameterValues("ORegan2022")
 parameter_values_okane = pybamm.ParameterValues("OKane2022")
 combined_dict = {**parameter_values_okane, **parameter_values_ORegan}
 combined_parameters = pybamm.ParameterValues(combined_dict)
 parameter_values_298 = combined_parameters
 
-# Define thermal conductivity as temperature-dependent functions
 parameter_values_298["Positive electrode thermal conductivity [W.m-1.K-1]"] = pybamm.FunctionParameter(
     "Positive electrode thermal conductivity [W.m-1.K-1]",
     {"Temperature [K]": pybamm.InputParameter("Temperature [K]")},
     lambda_pos
 )
-
 parameter_values_298["Negative electrode thermal conductivity [W.m-1.K-1]"] = pybamm.FunctionParameter(
     "Negative electrode thermal conductivity [W.m-1.K-1]",
     {"Temperature [K]": pybamm.InputParameter("Temperature [K]")},
     lambda_neg
 )
 
-# Define custom parameter updates from the tables
 custom_parameters = {
-    # Previous parameters (from the first table)
-    # SEI Parameters
     "Ratio of lithium moles to SEI moles": 2,
     "Lithium interstitial reference concentration [mol.m-3]": 15,
     "SEI resistivity [Ohm.m]": 2e5,
     "Inner SEI proportion": 0.5,
     "Initial inner SEI thickness [m]": 1.23625e-08,
     "Initial outer SEI thickness [m]": 1.23625e-08,
-    "Initial concentration in electrolyte [mol.m-3]": 1000,  # Li⁺ concentration
+    "Initial concentration in electrolyte [mol.m-3]": 1000,
     "Initial EC concentration in electrolyte [mol.m-3]": 4541,
-
-    # Solvent Consumption Parameters
     "EC partial molar volume [m3.mol-1]": 6.667e-5,
-
-    # Lithium Plating Parameters
     "Lithium plating transfer coefficient": 0.65,
     "Initial plated lithium concentration [mol.m-3]": 0,
     "Lithium metal partial molar volume [m3.mol-1]": 1.3e-5,
-
-    # New parameters from Table S7
-    # LAM Model Parameters
     "Positive electrode LAM constant exponential term": 2,
     "Negative electrode LAM constant exponential term": 2,
     "Positive electrode stress intensity factor correction": 1.12,
     "Negative electrode stress intensity factor correction": 1.12,
-
-    # Mechanical and Cracking Parameters
     "Positive electrode Paris' law exponent m_cr": 2.2,
     "Negative electrode Paris' law exponent m_cr": 2.2,
     "Positive electrode number of cracks per unit area [m-2]": 3.18e15,
@@ -116,21 +74,19 @@ custom_parameters = {
     "Negative electrode initial crack length [m]": 2e-08,
     "Positive electrode initial crack width [m]": 1.5e-08,
     "Negative electrode initial crack width [m]": 1.5e-08,
-    "Positive electrode critical stress [Pa]": 375e6,  # Convert MPa to Pa
-    "Negative electrode critical stress [Pa]": 60e6,  # Convert MPa to Pa
+    "Positive electrode critical stress [Pa]": 375e6,
+    "Negative electrode critical stress [Pa]": 60e6,
 }
-
-# Apply the updates from the tables
 parameter_values_298 = update_parameters(parameter_values_298, custom_parameters)
-
-# Additional parameter update you had
-# Additional parameter update you had
 parameter_values_298.update({"Lithium plating kinetic rate constant [m.s-1]": 5e-11})
 parameter_values_298.update({"Negative electrode cracking rate": 5.29e-25})
 parameter_values_298.update({"Positive electrode cracking rate": 5.29e-25})
 
-# -------------------- MODEL ---------------------
-# Define the model for irreversible lithium plating
+# Variable related to the parameters
+v_up_cutoff = parameter_values_298["Upper voltage cut-off [V]"]
+v_low_cutoff = parameter_values_298["Lower voltage cut-off [V]"]
+nominal_capacity = parameter_values_298["Nominal cell capacity [A.h]"]
+
 model_partially_reversible = pb.lithium_ion.DFN(options={
     "SEI": "interstitial-diffusion limited",
     "SEI porosity change": "true",
@@ -142,156 +98,163 @@ model_partially_reversible = pb.lithium_ion.DFN(options={
     "thermal": "lumped",
 })
 
-# Define spatial discretization points
-var_pts = {
-    "x_n": 5,  # negative electrode
-    "x_s": 5,  # separator
-    "x_p": 30,  # positive electrode
-    "r_n": 30,  # negative particle
-    "r_p": 30,  # positive particle
-}
+file_path = '/Users/david/PycharmProjects/memoire/Synthetic_data/1C_298K.pkl'
+solution = pb.load(file_path)
+print("ok")
 
-#-------------------------- Experiment --------------------------
+# Extract solutions outputs
+time = solution["Time [s]"].entries  # Keep in seconds
+voltage = solution["Terminal voltage [V]"].entries
+current = solution["Current [A]"].entries
+capacity_loss_sr = solution["Total capacity lost to side reactions [A.h]"].entries
+capacity_lost_side_reactions_percent = (capacity_loss_sr / nominal_capacity) * 100
 
-# Define the experiment: Cycling at 298.15 K
-cycle_number = 300
-experiment_298 = pybamm.Experiment(
-    [
-        "Hold at 4.4 V until C/100 (5 minute period)",
-        "Rest for 4 hours (5 minute period)",
-        "Discharge at 0.1C until 2.5 V (5 minute period)",  # initial capacity check
-        "Charge at 0.3C until 4.4 V (5 minute period)",
-        "Hold at 4.4 V until C/100 (5 minute period)",
-    ] + [
-        (
-            "Discharge at 4C until 2.5 V",  # ageing cycles 2C discharge
-            "Charge at 0.3C until 4.4 V (5 minute period)",
-            "Hold at 4.4 V until C/100 (5 minute period)",
-        )
-    ] * cycle_number + ["Discharge at 0.1C until 2.5 V (5 minute period)"],  # final capacity check
-)
+soh = 1 - (capacity_lost_side_reactions_percent / 100)
 
-# Create a progress bar callback
-class ProgressCallback(pybamm.callbacks.Callback):
-    def __init__(self, total_steps, model_name):
-        super().__init__()
-        self.total_steps = total_steps
-        self.model_name = model_name
-        self.pbar = tqdm(total=total_steps, desc=f"Simulation Progress ({self.model_name})", unit="step")
-        self.current_step = 0
+c_100_threshold = nominal_capacity / 100
 
-    def on_experiment_start(self, logs):
-        self.pbar.set_description(f"Simulation Progress ({self.model_name} - Starting)")
+# ----------------------------------- Feature extraction -----------------------------------
+v_cc_start_counting = 3.8
+voltage_cv_threshold = 4.4 - 0.01
+cccv_starts = []
+cc_starts_41 = []
+cv_starts = []
+cv_ends = []
+cc_durations = []
+cv_durations = []
+cc_end_slopes = []
+soh_at_cycle_ends = []
 
-    def on_step_start(self, logs):
-        pass
+slope_window = 5
 
-    def on_step_end(self, logs):
-        self.current_step += 1
-        self.pbar.update(1)
-        self.pbar.set_description(f"Simulation Progress ({self.model_name} - Step {self.current_step}/{self.total_steps})")
+# Feature extraction algorithm
+for i in range(1, len(voltage)):
+    if voltage[i - 1] < v_low_cutoff + eps and voltage[i] > v_low_cutoff + eps and current[i] < 0:
+        cccv_starts.append(i)
 
-    def on_experiment_end(self, logs):
-        self.pbar.set_description(f"Simulation Progress ({self.model_name} - Finished)")
-        self.pbar.close()
+for start_idx in cccv_starts:
+    cc_start_41_idx = None
+    for i in range(start_idx, len(voltage)):
+        if voltage[i] >= v_cc_start_counting and current[i] < 0:
+            # Check if current remains negative until CV voltage is reached
+            valid_cc_start = True
+            for j in range(i, len(voltage)):
+                if voltage[j] >= voltage_cv_threshold - eps:
+                    break  # Stop checking once CV voltage is reached
+                if current[j] >= 0:  # Current becomes non-negative before CV
+                    valid_cc_start = False
+                    break
+            if valid_cc_start:
+                cc_start_41_idx = i
+                break
 
-    def on_experiment_error(self, logs):
-        self.pbar.set_description(f"Simulation Progress ({self.model_name} - Error)")
-        self.pbar.close()
+    cv_start_idx = None
+    for i in range(start_idx, len(voltage) - 1):
+        if (voltage[i] >= voltage_cv_threshold and
+                abs(voltage[i + 1] - voltage[i]) < 0.001 and
+                current[i] < 0):
+            cv_start_idx = i
+            break
 
-# Estimate the number of steps
-total_steps = 5 + (3 * cycle_number) + 1
+    cv_end_idx = None
+    for i in range(cv_start_idx or start_idx, len(voltage) - 1):
+        if (abs(current[i]) <= c_100_threshold or
+                (current[i] > 0 and voltage[i] < 4.0)):
+            cv_end_idx = i
+            break
 
-# Create and solve simulation
-solver = pybamm.IDAKLUSolver()  # Using CasadiSolver for stability
+    if (cc_start_41_idx and cv_start_idx and cv_end_idx and
+            cc_start_41_idx < cv_start_idx < cv_end_idx):
+        cc_starts_41.append(cc_start_41_idx)
+        cv_starts.append(cv_start_idx)
+        cv_ends.append(cv_end_idx)
+        cc_duration = time[cv_start_idx] - time[cc_start_41_idx]
+        cv_duration = time[cv_end_idx] - time[cv_start_idx]
+        cc_durations.append(cc_duration)
+        cv_durations.append(cv_duration)
 
-# Simulation for Irreversible model
-callback_pr = ProgressCallback(total_steps, "Irreversible")
-sim_298_pr = pb.Simulation(model_partially_reversible, parameter_values=parameter_values_298, experiment=experiment_298, solver=solver, var_pts=var_pts)
+        window_start = max(cc_start_41_idx, cv_start_idx - slope_window)
+        window_end = cv_start_idx + 1
+        time_window = time[window_start:window_end]
+        voltage_window = voltage[window_start:window_end]
+        slope = np.gradient(voltage_window, time_window)[-1]
+        cc_end_slopes.append(slope)
 
-# Measure the time for the simulation
-start_time_simulation = time.perf_counter()
-try:
-    solution_298_pr = sim_298_pr.solve(callbacks=[callback_pr])
-except Exception as e:
-    print(f"Simulation failed for Irreversible model with error: {e}")
-    raise
-end_time_simulation = time.perf_counter()
-simulation_time = end_time_simulation - start_time_simulation
-print(f"\nSimulation took {simulation_time:.2f} seconds (or {simulation_time/60:.2f} min) to complete.")
+        # Store SoH at the end of the cycle (CV end)
+        soh_at_cycle_ends.append(soh[cv_end_idx])
 
-#-------------------------- Results --------------------------
+# Print results
+print(f"Number of CCCV cycles detected: {len(cccv_starts)}")
+for i, (cc_dur, cv_dur, slope, soh_end) in enumerate(zip(cc_durations, cv_durations, cc_end_slopes, soh_at_cycle_ends), 1):
+    print(f"Cycle {i}: CC duration (3.8 V to CV) = {cc_dur:.2f} seconds, "
+          f"CV duration = {cv_dur:.2f} seconds, Voltage slope at CC end = {slope:.6f} V/s, "
+          f"SoH at cycle end = {soh_end*100:.2f}%")
 
-# Extract variables
-try:
-    time_298_pr = solution_298_pr["Time [s]"].entries
-    current_298_pr = solution_298_pr["Current [A]"].entries
-    voltage_298_pr = solution_298_pr["Terminal voltage [V]"].entries
-    temperature_298_pr = solution_298_pr["Volume-averaged cell temperature [K]"].entries
-    capacity_lost_side_reactions_298_pr = solution_298_pr["Total capacity lost to side reactions [A.h]"].entries
-except KeyError as e:
-    print(f"Error extracting variable: {e}")
-    print("Available variables in Irreversible solution:")
-    print(list(solution_298_pr.variables.keys()))
-    raise
-
-# Convert time to hours
-time_298_pr_hours = time_298_pr / 3600
-
-# Convert temperature from Kelvin to Celsius
-temperature_298_pr_celsius = temperature_298_pr - 273.15
-
-# Get nominal capacity from parameters and calculate capacity loss in percentage
-nominal_capacity = parameter_values_298["Nominal cell capacity [A.h]"]
-capacity_lost_side_reactions_percent = (capacity_lost_side_reactions_298_pr / nominal_capacity) * 100
-
-# Plot
-plt.figure(figsize=(12, 8))
-
-# Plot Current vs Time
-plt.subplot(2, 2, 1)
-plt.plot(time_298_pr_hours, current_298_pr, label="Current [A]", color="blue")
-plt.xlabel("Time [hours]")
-plt.ylabel("Current [A]")
-plt.title("Current vs Time")
-plt.grid(True)
-plt.legend()
-
-# Plot Voltage vs Time
-plt.subplot(2, 2, 2)
-plt.plot(time_298_pr_hours, voltage_298_pr, label="Terminal Voltage [V]", color="orange")
+# Plot Voltage vs Time with CCCV, CC, and CV markers
+time_hours = time / 3600  # Convert to hours for plotting
+plt.figure(figsize=(12, 6))
+plt.plot(time_hours, voltage, label="Terminal Voltage [V]", color="blue")
+for idx, start_idx in enumerate(cccv_starts):
+    plt.axvline(x=time_hours[start_idx], color="red", linestyle="--", alpha=0.5,
+                label=f"CCCV Cycle Start {idx + 1}" if idx == 0 else None)
+for idx, (cc_idx, cv_start_idx, cv_end_idx) in enumerate(zip(cc_starts_41, cv_starts, cv_ends)):
+    plt.axvline(x=time_hours[cc_idx], color="green", linestyle=":", alpha=0.7,
+                label="CC Start (3.8 V)" if idx == 0 else None)
+    plt.axvline(x=time_hours[cv_start_idx], color="purple", linestyle="-.", alpha=0.7,
+                label="CV Start (4.4 V)" if idx == 0 else None)
+    plt.axvline(x=time_hours[cv_end_idx], color="orange", linestyle="-", alpha=0.7,
+                label="CV End" if idx == 0 else None)
 plt.xlabel("Time [hours]")
 plt.ylabel("Voltage [V]")
-plt.title("Voltage vs Time")
+plt.title("Voltage vs Time with CCCV, CC, and CV Markers (1C Discharge, 20 Cycles)")
 plt.grid(True)
 plt.legend()
-
-# Plot Surface Temperature vs Time (in Celsius)
-plt.subplot(2, 2, 3)
-plt.plot(time_298_pr_hours, temperature_298_pr_celsius, label="Temperature [°C]", color="green")
-plt.xlabel("Time [hours]")
-plt.ylabel("Temperature [°C]")
-plt.title("Average Temperature vs Time")
-plt.grid(True)
-plt.legend()
-
-# Plot Capacity Lost to Side Reactions vs Time (in Percentage)
-plt.subplot(2, 2, 4)
-plt.plot(time_298_pr_hours, capacity_lost_side_reactions_percent, label="Capacity Lost [%]", color="red")
-plt.xlabel("Time [hours]")
-plt.ylabel("Capacity Lost [%]")
-plt.title("Capacity Loss due to Side Reactions vs Time")
-plt.grid(True)
-plt.legend()
-
-plt.tight_layout()
 plt.show()
 
-# Save the solution
-solution_298_pr.save("4C_298K.pkl")
-print("Simulation solution saved to '0_3C_298K.pkl'")
+# Plot Capacity Loss vs Time
+plt.figure(figsize=(12, 6))
+plt.plot(time_hours, capacity_lost_side_reactions_percent, label="Capacity Loss [%]", color="red")
+plt.xlabel("Time [hours]")
+plt.ylabel("Capacity Loss [%]")
+plt.title("Capacity Loss vs Time")
+plt.grid(True)
+plt.legend()
+plt.show()
 
-# Record the end time for the entire script and calculate total time
-end_time_total = time.perf_counter()
-total_time = end_time_total - start_time_total
-print(f"\nTotal execution time: {total_time:.2f} seconds ({total_time/60:.2f} minutes).")
+# Plot Voltage and Current vs Time in separate subplots
+fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(12, 8), sharex=True)
+
+# Voltage subplot
+ax1.plot(time_hours, voltage, label="Terminal Voltage [V]", color="red")
+ax1.set_ylabel("Voltage [V]", color="red")
+ax1.tick_params(axis="y", labelcolor="red")
+ax1.grid(True)
+ax1.legend(loc="upper right")
+
+# Current subplot
+ax2.plot(time_hours, current, label="Current [A]", color="blue")
+ax2.set_xlabel("Time [hours]")
+ax2.set_ylabel("Current [A]", color="blue")
+ax2.tick_params(axis="y", labelcolor="blue")
+ax2.grid(True)
+ax2.legend(loc="upper right")
+
+# Overall figure title
+fig.suptitle("Voltage and Current vs Time")
+plt.tight_layout(rect=[0, 0, 1, 0.95])  # Adjust layout to fit title
+plt.show()
+
+# Plot SoH vs Time
+plt.figure(figsize=(12, 6))
+plt.plot(time_hours, soh * 100, label="State of Health [%]", color="green")
+plt.xlabel("Time [hours]")
+plt.ylabel("SoH [%]")
+plt.title("State of Health vs Time")
+plt.grid(True)
+plt.legend()
+plt.show()
+
+# Print verification info
+print(f"Total simulation time: {time[-1]:.2f} seconds ({time_hours[-1]:.2f} hours)")
+print(f"Voltage range: {min(voltage):.2f} V to {max(voltage):.2f} V")
+print(f"SoH range: {min(soh)*100:.2f}% to {max(soh)*100:.2f}%")

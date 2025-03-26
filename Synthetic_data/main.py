@@ -1,4 +1,5 @@
 # M. David Synthetic data generation March 2025
+
 import pybamm
 import pybamm as pb
 import numpy as np
@@ -6,12 +7,12 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm  # Import tqdm for progress bar
 import time  # Import time for measuring execution time
 import re  # Import re for regular expressions
-
+print(f"PyBaMM version: {pybamm.__version__}")
 # Record the start time for the entire script
 start_time_total = time.perf_counter()
 
 # Print PyBaMM version
-print(f"PyBaMM version: {pybamm.__version__}")
+
 
 # ---------------- FUNCTION ------------------------
 def lambda_pos(T):
@@ -83,51 +84,24 @@ custom_parameters = {
     # Previous parameters (from the first table)
     # SEI Parameters
     "Ratio of lithium moles to SEI moles": 2,
-    "Lithium interstitial reference concentration [mol.m-3]": 15,
-    "SEI resistivity [Ohm.m]": 2e5,
-    "Inner SEI proportion": 0.5,
-    "Initial inner SEI thickness [m]": 1.23625e-08,
-    "Initial outer SEI thickness [m]": 1.23625e-08,
-    "Initial concentration in electrolyte [mol.m-3]": 1000,  # Li⁺ concentration
-    "Initial EC concentration in electrolyte [mol.m-3]": 4541,
 
-    # Solvent Consumption Parameters
-    "EC partial molar volume [m3.mol-1]": 6.667e-5,
-
-    # Lithium Plating Parameters
-    "Lithium plating transfer coefficient": 0.65,
-    "Initial plated lithium concentration [mol.m-3]": 0,
-    "Lithium metal partial molar volume [m3.mol-1]": 1.3e-5,
-
-    # New parameters from Table S7
-    # LAM Model Parameters
-    "Positive electrode LAM constant exponential term": 2,
-    "Negative electrode LAM constant exponential term": 2,
-    "Positive electrode stress intensity factor correction": 1.12,
-    "Negative electrode stress intensity factor correction": 1.12,
-
-    # Mechanical and Cracking Parameters
-    "Positive electrode Paris' law exponent m_cr": 2.2,
-    "Negative electrode Paris' law exponent m_cr": 2.2,
-    "Positive electrode number of cracks per unit area [m-2]": 3.18e15,
-    "Negative electrode number of cracks per unit area [m-2]": 3.18e15,
-    "Positive electrode initial crack length [m]": 2e-08,
-    "Negative electrode initial crack length [m]": 2e-08,
-    "Positive electrode initial crack width [m]": 1.5e-08,
-    "Negative electrode initial crack width [m]": 1.5e-08,
-    "Positive electrode critical stress [Pa]": 375e6,  # Convert MPa to Pa
-    "Negative electrode critical stress [Pa]": 60e6,  # Convert MPa to Pa
 }
 
 # Apply the updates from the tables
 parameter_values_298 = update_parameters(parameter_values_298, custom_parameters)
 
 # Additional parameter update you had
+# Additional parameter update you had
 parameter_values_298.update({"Lithium plating kinetic rate constant [m.s-1]": 5e-11})
+
+#Taken from https://arxiv.org/pdf/2311.05482
+parameter_values_298.update({"Ratio of lithium moles to SEI moles": 2})
+parameter_values_298.update({"Negative electrode cracking rate": 5.29e-25})
+parameter_values_298.update({"Positive electrode cracking rate": 5.29e-25})
 
 # -------------------- MODEL ---------------------
 # Define the model for irreversible lithium plating
-model_partially_reversible = pb.lithium_ion.DFN(options={
+model = pb.lithium_ion.DFN(options={
     "SEI": "interstitial-diffusion limited",
     "SEI porosity change": "true",
     "lithium plating": "irreversible",
@@ -150,7 +124,7 @@ var_pts = {
 #-------------------------- Experiment --------------------------
 
 # Define the experiment: Cycling at 298.15 K
-cycle_number = 300
+cycle_number = 10
 experiment_298 = pybamm.Experiment(
     [
         "Hold at 4.4 V until C/100 (5 minute period)",
@@ -160,7 +134,7 @@ experiment_298 = pybamm.Experiment(
         "Hold at 4.4 V until C/100 (5 minute period)",
     ] + [
         (
-            "Discharge at 0.5C until 2.5 V",  # ageing cycles 2C discharge
+            "Discharge at 2C until 2.5 V",  # ageing cycles 2C discharge
             "Charge at 0.3C until 4.4 V (5 minute period)",
             "Hold at 4.4 V until C/100 (5 minute period)",
         )
@@ -203,12 +177,12 @@ solver = pybamm.IDAKLUSolver()  # Using CasadiSolver for stability
 
 # Simulation for Irreversible model
 callback_pr = ProgressCallback(total_steps, "Irreversible")
-sim_298_pr = pb.Simulation(model_partially_reversible, parameter_values=parameter_values_298, experiment=experiment_298, solver=solver, var_pts=var_pts)
+sim_298 = pb.Simulation(model, parameter_values=parameter_values_298, experiment=experiment_298, solver=solver, var_pts=var_pts)
 
 # Measure the time for the simulation
 start_time_simulation = time.perf_counter()
 try:
-    solution_298_pr = sim_298_pr.solve(callbacks=[callback_pr])
+    solution_298_pr = sim_298.solve(callbacks=[callback_pr])
 except Exception as e:
     print(f"Simulation failed for Irreversible model with error: {e}")
     raise
@@ -240,7 +214,7 @@ temperature_298_pr_celsius = temperature_298_pr - 273.15
 # Get nominal capacity from parameters and calculate capacity loss in percentage
 nominal_capacity = parameter_values_298["Nominal cell capacity [A.h]"]
 capacity_lost_side_reactions_percent = (capacity_lost_side_reactions_298_pr / nominal_capacity) * 100
-
+'''
 # Plot
 plt.figure(figsize=(12, 8))
 
@@ -282,10 +256,10 @@ plt.legend()
 
 plt.tight_layout()
 plt.show()
-
+'''
 # Save the solution
-solution_298_pr.save("0_5C_298K.pkl")
-print("Simulation solution saved to '4C_298K.pkl'")
+solution_298_pr.save("2C_298K.pkl")
+print("Simulation solution saved to '0_3C_298K.pkl'")
 
 # Record the end time for the entire script and calculate total time
 end_time_total = time.perf_counter()
