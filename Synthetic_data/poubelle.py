@@ -9,7 +9,7 @@ print("Starting feature extraction from CSV file...")
 start_time_total = time.perf_counter()
 
 # ------------- Load Data from CSV File --------------------------
-file_path = '/Users/moliconstruct/PycharmProjects/memoire_v2/.venv/0_8C_298K.csv'
+file_path = '/Users/david/PycharmProjects/memoire/Synthetic_data/1C_OKane_advices_x20r60_29_06.csv'
 raw_data_df = pd.read_csv(file_path)
 
 # Verify the columns in the CSV file
@@ -24,13 +24,13 @@ temperature_celsius = raw_data_df["Temperature_C"].values  # Temperature in Cels
 temperature = temperature_celsius + 273.15  # Convert to Kelvin
 capacity_lost_side_reactions_percent = raw_data_df["Capacity_Lost_Percent"].values  # Capacity loss in percent
 discharge_capacity = raw_data_df["Discharge_Capacity_Ah"].values  # Discharge capacity in A.h
+#lam = raw_data_df["LAM_neg_electrode"].values
 
-# Nominal capacity (hardcoded as in the original code, since it's not in the CSV)
 nominal_capacity = 5.0  # A.h (assumed value; adjust based on your simulation settings)
 
 # Compute SoC and SoH
 soc = 1 - (discharge_capacity / nominal_capacity)
-soh = 1 - (capacity_lost_side_reactions_percent / 100)
+soh = 1 - ((capacity_lost_side_reactions_percent ) / 100)
 
 # Threshold for CV end detection
 c_100_threshold = nominal_capacity / 100
@@ -38,7 +38,7 @@ c_100_threshold = nominal_capacity / 100
 # ----------------------------------- Feature Extraction -----------------------------------
 eps = 1e-2
 v_cc_start_counting = 3.8
-voltage_cv_threshold = 4.4 - 0.01
+voltage_cv_threshold = 4.4 - 0.001
 cccv_starts = []
 cc_starts_41 = []
 cv_starts = []
@@ -47,11 +47,20 @@ cc_durations = []
 cv_durations = []
 voltage_slopes_at_38V = []
 avg_temps_during_cccv = []
+avg_current_during_cccv = []
 avg_voltages_during_cc = []
+energy_during_cc = []
 time_between_cycles = []
 soh_at_cycle_ends = []
 time_at_cycle_ends = []
+initial_cap = None
+rpt_capacities = []
+
+delta_t_vector = np.diff(time)
 slope_window = 10  # Window size for slope calculation
+count_cv_end_idx = 0
+voltage_grad = np.gradient(voltage, time)
+print(f"Voltage grad: {voltage_grad}")
 
 # Feature extraction algorithm
 counter_cycles = 1
@@ -82,26 +91,35 @@ for cycle_num, start_idx in enumerate(cccv_starts, 1):
                     valid_cc_start = False
                     break
             if valid_cc_start:
-                cc_start_41_idx = i
+                distance_to_41_i = abs(voltage[i] - v_cc_start_counting)
+                ditance_to_41_i_1 = abs(voltage[i-1] - v_cc_start_counting)
+                if min(ditance_to_41_i_1, distance_to_41_i) == ditance_to_41_i_1:
+                    cc_start_41_idx = i-1
+                    print("Took the it before, we were doing something wrong blud")
+                else:
+                    cc_start_41_idx = i
                 break
 
     cv_start_idx = None
     for i in range(start_idx, len(voltage) - 1):
-        if (voltage[i] >= voltage_cv_threshold - eps and
+        if (voltage[i] >= voltage_cv_threshold  and
                 abs(voltage[i + 1] - voltage[i]) < 0.001 and
                 current[i] < 0):
             cv_start_idx = i
+
             break
 
     cv_end_idx = None
     for i in range(cv_start_idx or start_idx, len(voltage) - 1):
-        if (abs(current[i]) <= c_100_threshold or
-                (current[i] > 0 and voltage[i] < 4.0)):
+        if (abs(current[i]) <= c_100_threshold) or current[i] > 0:
             cv_end_idx = i
+
+
             break
 
+
     if not (cc_start_41_idx and cv_start_idx and cv_end_idx and
-            cc_start_41_idx < cv_start_idx < cv_end_idx):
+            cc_start_41_idx < cv_start_idx < cv_end_idx) :
         print(f"Cycle {cycle_num} failed condition: "
               f"CC Start = {cc_start_41_idx}, CV Start = {cv_start_idx}, CV End = {cv_end_idx}")
     else:
@@ -113,32 +131,61 @@ for cycle_num, start_idx in enumerate(cccv_starts, 1):
         cc_durations.append(cc_duration)
         cv_durations.append(cv_duration)
 
-        # Calculate slope at 3.8 V
-        window_start = max(0, cc_start_41_idx - slope_window // 2)
-        window_end = min(len(voltage), cc_start_41_idx + slope_window // 2 + 1)
-        time_window = time[window_start:window_end]
-        voltage_window = voltage[window_start:window_end]
-        if len(time_window) >= 2:
-            coefficients = np.polyfit(time_window, voltage_window, 1)
-            slope = coefficients[0]
-        else:
-            slope = 0
-            print(f"  Warning: Not enough points to calculate slope for cycle {cycle_num + 1}")
-        voltage_slopes_at_38V.append(slope)
+        # # Calculate slope at 3.8 V
+        # window_start = max(0, cc_start_41_idx - slope_window // 2)
+        # window_end = min(len(voltage), cc_start_41_idx + slope_window // 2 + 1)
+        # time_window = time[window_start:window_end]
+        # voltage_window = voltage[window_start:window_end]
+        # if len(time_window) >= 2:
+        #     coefficients = np.polyfit(time_window, voltage_window, 1)
+        #     slope = coefficients[0]
+        # else:
+        #     slope = 0
+        #     print(f"  Warning: Not enough points to calculate slope for cycle {cycle_num + 1}")
+        # voltage_slopes_at_38V.append(slope)
+
+        t_cc_start_cycle_i = time[cc_start_41_idx]
+        delta_t = time[cc_start_41_idx+2] - time[cc_start_41_idx-2]
+        delta_v = voltage[cc_start_41_idx+2] - voltage[cc_start_41_idx-2]
+        slope = delta_v/delta_t
+
+        voltage_slope_at_38V = voltage_grad[cc_start_41_idx]
+        voltage_slopes_at_38V.append(voltage_slope_at_38V)
 
         # Calculate average temperature during CCCV
-        temp_cccv = temperature_celsius[start_idx:cv_end_idx + 1]
-        avg_temp = np.mean(temp_cccv)
+        temp_cccv = temperature_celsius[cc_start_41_idx:cv_end_idx + 1]
+        avg_temp = np.sum(temp_cccv*delta_t_vector[cc_start_41_idx:cv_end_idx+1])/ (time[ cv_end_idx+1] - time[cc_start_41_idx])
         avg_temps_during_cccv.append(avg_temp)
 
-        # Calculate average voltage during CC phase (3.8 V to 4.4 V)
-        voltage_cc = voltage[cc_start_41_idx:cv_start_idx + 1]
-        avg_voltage_cc = np.mean(voltage_cc)
+        #Calculate average current during CCCV phase
+        current_cccv = current[cc_start_41_idx:cv_end_idx+1]
+        avg_curr = np.sum(current_cccv*delta_t_vector[cc_start_41_idx:cv_end_idx+1])/ (time[ cv_end_idx+1] - time[cc_start_41_idx])
+        avg_current_during_cccv.append(avg_curr)
+
+        # Calculate average voltage during CCCV phase (3.8 V to 4.4 V)
+        # voltage_cc = voltage[cc_start_41_idx:cv_end_idx + 1]
+        # avg_voltage_cc = np.mean(voltage_cc)
+        # avg_voltages_during_cc.append(avg_voltage_cc)
+
+        # Calculate average Voltage during CCCV phase
+        voltage_cccv = voltage[cc_start_41_idx:cv_end_idx+1]
+        avg_voltage_cc = np.sum(voltage_cccv*delta_t_vector[cc_start_41_idx:cv_end_idx+1])/ (time[ cv_end_idx+1] - time[cc_start_41_idx])
         avg_voltages_during_cc.append(avg_voltage_cc)
+
+        # Calculate the energy during CC phase cte current -> integral of V.I
+        current_cc = abs(current[cc_start_41_idx: cv_end_idx+1])          #taking abs value to have positive energy
+        voltage_cc = voltage[cc_start_41_idx:cv_end_idx+1]
+        time_cc = time[cc_start_41_idx:cv_end_idx+1]
+        #energy_vector = current_cc * voltage_cc * delta_t_vector
+        energy = np.trapz(voltage_cc*current_cc, time_cc)
+        energy_during_cc.append(energy)
+
 
         soh_at_cycle_ends.append(soh[cv_end_idx])
 
+
 # Print results
+
 print(f"Number of CCCV cycles detected: {len(cccv_starts)}")
 for i, (cc_dur, cv_dur, slope, avg_temp, avg_voltage, time_diff, soh_end) in enumerate(
         zip(cc_durations, cv_durations, voltage_slopes_at_38V, avg_temps_during_cccv, avg_voltages_during_cc, time_between_cycles, soh_at_cycle_ends), 1):
@@ -149,20 +196,36 @@ for i, (cc_dur, cv_dur, slope, avg_temp, avg_voltage, time_diff, soh_end) in enu
           f"Time between cycles = {time_diff_str} s, SoH at cycle end = {soh_end*100:.2f}%")
 
 # Store features in a CSV file
+n_cycles = len(cc_durations)
 features_dict = {
-    "Cycle": list(range(1, len(cc_durations) + 1)),
-    "CC_Duration_seconds": cc_durations,
-    "CV_Duration_seconds": cv_durations,
-    "Voltage_Slope_at_38V": voltage_slopes_at_38V,
-    "Avg_Temperature_during_CCCV_Celsius": avg_temps_during_cccv,
-    "Avg_Voltage_during_CC": avg_voltages_during_cc,
-    "Time_Between_Cycles_seconds": time_between_cycles,
-    "SoH_at_Cycle_End": [soh * 100 for soh in soh_at_cycle_ends]
+    "Cycle": list(range(1, n_cycles)),
+    "CC_Duration_seconds": cc_durations[:n_cycles - 1],
+    "CV_Duration_seconds": cv_durations[:n_cycles - 1],
+    "Voltage_Slope_at_38V": voltage_slopes_at_38V[:n_cycles - 1],
+    "Avg_Temperature_during_CCCV_Celsius": avg_temps_during_cccv[:n_cycles - 1],
+    "Avg_Current_during_CCCV": avg_current_during_cccv[:n_cycles - 1],
+    "Avg_Voltage_during_CC": avg_voltages_during_cc[:n_cycles - 1],
+    "Energy_during_CCCV_VAs": energy_during_cc[:n_cycles - 1],
+    "Time_Between_Cycles_seconds": time_between_cycles[:n_cycles - 1],
+    "Time_At_Cycle_end": time_at_cycle_ends[:n_cycles - 1],
+    "SoH_at_Cycle_End": [soh * 100 for soh in soh_at_cycle_ends][:n_cycles -1]
 }
 features_df = pd.DataFrame(features_dict)
-features_df.to_csv("battery_features_0_8C_298K.csv", index=False)
-print("Features saved to 'battery_features_0_8C_298K.csv'")
+features_df.to_csv("battery_features_1C_298K_rpt_02_05.csv", index=False)
+print("Features saved to 'battery_features_1C_298K_rpt_casadi.csv'")
 
+
+
+
+
+
+
+
+
+
+'''----------------------------------------------------- ---------------------------------------------------------
+----------------------------------------------------- PLOT ----------------------------------------------------- 
+----------------------------------------------------- ------------------------------------------------------------'''
 # Plot Voltage vs Time with CCCV, CC, and CV markers
 plt.figure(figsize=(12, 6))
 plt.plot(time_hours, voltage, label="Terminal Voltage [V]", color="blue")
@@ -178,20 +241,13 @@ for idx, (cc_idx, cv_start_idx, cv_end_idx) in enumerate(zip(cc_starts_41, cv_st
                 label="CV End" if idx == 0 else None)
 plt.xlabel("Time [hours]")
 plt.ylabel("Voltage [V]")
-plt.title("Voltage vs Time with CCCV, CC, and CV Markers (0_8C Discharge)")
+plt.title("Voltage vs Time with CCCV, CC, and CV Markers (1C Discharge)")
 plt.grid(True)
 plt.legend()
 plt.show()
 
-# Plot Capacity Loss vs Time
-plt.figure(figsize=(12, 6))
-plt.plot(time_hours, capacity_lost_side_reactions_percent, label="Capacity Loss [%]", color="red")
-plt.xlabel("Time [hours]")
-plt.ylabel("Capacity Loss [%]")
-plt.title("Capacity Loss vs Time")
-plt.grid(True)
-plt.legend()
-plt.show()
+
+
 
 # Plot Voltage and Current vs Time in separate subplots
 fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(12, 8), sharex=True)
@@ -222,6 +278,18 @@ fig.suptitle("Voltage and Current vs Time")
 plt.tight_layout(rect=[0, 0, 1, 0.95])
 plt.show()
 
+
+'''
+# Plot Capacity Loss vs Time
+plt.figure(figsize=(12, 6))
+plt.plot(time_hours, capacity_lost_side_reactions_percent, label="Capacity Loss [%]", color="red")
+plt.xlabel("Time [hours]")
+plt.ylabel("Capacity Loss [%]")
+plt.title("Capacity Loss vs Time")
+plt.grid(True)
+plt.legend()
+plt.show()
+
 # Plot SoH vs Time
 plt.figure(figsize=(12, 6))
 plt.plot(time_hours, soh * 100, label="State of Health [%]", color="green")
@@ -231,7 +299,7 @@ plt.title("State of Health vs Time")
 plt.grid(True)
 plt.legend()
 plt.show()
-
+'''
 # Print verification info
 print(f"Total simulation time: {time[-1]:.2f} seconds ({time_hours[-1]:.2f} hours)")
 print(f"Voltage range: {min(voltage):.2f} V to {max(voltage):.2f} V")
