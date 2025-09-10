@@ -6,7 +6,7 @@ import pandas as pd
 # ----------------------- PARAMETRISATION ----------------------
 
 parameter_values = pybamm.ParameterValues("Chen2020")
-parameter_values.update({"SEI kinetic rate constant [m.s-1]": 5e-15})  # To fit Okane's Deg
+parameter_values.update({"SEI kinetic rate constant [m.s-1]": 5e-16})  # To fit Okane's Deg
 print(parameter_values)
 # ----------------------- Models ----------------------
 model = pybamm.lithium_ion.DFN(options={"SEI": "ec reaction limited",
@@ -141,7 +141,7 @@ soc_cons = cs_avg/cs_max
 second_rpt = 2.406 + 2.56
 initial_cap = 5.123
 cc = sol["Discharge capacity [A.h]"].data
-soc_cc = initial_soc - 0.016 -  cc/second_rpt
+soc_cc = initial_soc - 0.016 -  cc/initial_cap
 
 
 
@@ -149,7 +149,7 @@ soc_cc = initial_soc - 0.016 -  cc/second_rpt
 print(np.max(x))
 plt.figure(figsize=(5.5, 3.4))
 plt.plot(t, soc, label='SoC with x', linewidth=2)
-plt.plot(t, soc_cons, linestyle='--', label='SoC with CC', linewidth=2)
+plt.plot(t, soc_cc, linestyle='--', label='SoC with CC', linewidth=2)
 plt.title('SoC methods comparison: CC vs proposed')
 plt.legend()
 plt.grid()
