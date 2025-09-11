@@ -18,13 +18,17 @@ Pour les points 1 et 2, je me base des réponses du Dr O'Kane (gros contributeur
 de la paramétrisation de modèles ainsi que d'implémenter certains algorithme d'estimation d'états/paramètres. Nicolas Courtier est une grande contributrice actuellement. 
 (code source: https://github.com/pybop-team/PyBOP) 
 
-4. Ma thèse regroupe différents méchanismes de dégradations pour simuler une batterie. Avec un peu de recul, pour de l'estimation d'état et montrer l'efficacité d'une méthode. Je ne pense 
+4. Ma thèse regroupe différents méchanismes de dégradations pour simuler une batterie. Avec un peu de recul, pour de l'estimation d'état et montrer l'efficacité d'un modèle, je ne pense 
 pas que ce soit totalement nécessaire en vu des complications que j'ai pu rencontrer. Mes conseils seraient de simplement avoir un modèle de SEI growth qui a été fitté à de la data 
 experimentale. Malheureusement avec un seul méchanisme de dégradation et un set de paramètres, on ne peut pas fitter toutes les conditions expérimentales (d'après ce que j'ai pu observer
 durant ma documentation sur la modélisation de la dégradation). 
 
 5. Il est intéressant de noter qu'il existe un code open access présentant différents méchanismes de dégradations dont l'un n'a pas encore été inclus dans PyBaMM qui a été validé sur base
-de différentes expériences et qui a surtout été vérifié pour chaque mode de dégradation. Une fois encore, un excellent article de Dr O'Kane: 
+de différentes expériences et qui a surtout été vérifié pour chaque mode de dégradation. Une fois encore, provenant d'un excellent article de Dr O'Kane (le lien vers le code se trouve dans
+l'article): 
 https://doi.org/10.1038/s41467-025-57968-3    (Une version plus complète de l'article est disponible sur arxiv: arXiv:2311.05482v2)
+
+6. Concernant la manière de calculer la solution d'une expérience, il est possible d'analyser et de ne sauvegarder qu'un certain nombre de cycles. Ce qui devient intéressant en ce qui
+concerne la gestion de la mémoire pour les longues simulations. 
 
 ```
