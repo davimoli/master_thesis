@@ -1,0 +1,30 @@
+### ICI TOUTES LES INFOS INTERESSANTES RELATIVES A PYBAMM.### 
+
+### IMPORTANT DE NOTER QUE PYBAMM EVOLUE TRES RAPIDEMENT ET QUE CERTAINS DE CES CONSEILS POURRAIENT BIEN DEVENIR OBSOLETES AVEC LE TEMPS ###
+
+
+```
+1. La capacité totale d'une batterie doit s'effectuer via des RPT (REFERENCE PERFORMANCE TEST) et ne peut pas être accédée via une variable de pybamm ormis via la methode 
+sol.summary_variables.all_variables qui n'est pas toujours accessible à tous les cycles en fonction de l'experience donnée dans le code
+
+2. Le SoC est calculé comme dans ma thèse dans pybamm, à savoir : SoC = (cs_avg - cs_0)/(cs_100-cs_0). Avec:
+cs_avg = sol["Average negative particle concentration [mol.m-3]"].data; cs_0 = cs_avg @ V_lower_cutoff_at_rest; cs_100 = cs_avg @ V_upper_cutoff_at_rest. Ceci peut être vérifié en comparant
+les résultats obtenus en lancant une experience en définissant un SoC initial de la facon suivante. Soit sim, une simulation prédéfinie dans pybamm: 
+sol = sim.solve(initial_soc=0.8) (ici, nous commencerions à 0.8% SoC. Tout ceci rend particulièrement dur de définir l'état de charge dans pybamm. Ce qui est souvent recommandé par les 
+contributeurs est de recopier ce qui se ferait dans l'experimental, à savoir, appliquer un comptage de coulomb tout en actualisant la capicité de la batterie à certaines fréquences. 
+Pour les points 1 et 2, je me base des réponses du Dr O'Kane (gros contributeur et très bon chercheur (selon moi ^^) travaillant avec pybamm: https://pybamm.discourse.group/t/soc-calculation/263/3
+
+3. Pybamm est relativement récent et n'est aujourd'hui pas totalement conçu pour de l'estimation d'état, cependant une nouvelle librairie est en plein développement. PyBOP permet de faire
+de la paramétrisation de modèles ainsi que d'implémenter certains algorithme d'estimation d'états/paramètres. Nicolas Courtier est une grande contributrice actuellement. 
+(code source: https://github.com/pybop-team/PyBOP) 
+
+4. Ma thèse regroupe différents méchanismes de dégradations pour simuler une batterie. Avec un peu de recul, pour de l'estimation d'état et montrer l'efficacité d'une méthode. Je ne pense 
+pas que ce soit totalement nécessaire en vu des complications que j'ai pu rencontrer. Mes conseils seraient de simplement avoir un modèle de SEI growth qui a été fitté à de la data 
+experimentale. Malheureusement avec un seul méchanisme de dégradation et un set de paramètres, on ne peut pas fitter toutes les conditions expérimentales (d'après ce que j'ai pu observer
+durant ma documentation sur la modélisation de la dégradation). 
+
+5. Il est intéressant de noter qu'il existe un code open access présentant différents méchanismes de dégradations dont l'un n'a pas encore été inclus dans PyBaMM qui a été validé sur base
+de différentes expériences et qui a surtout été vérifié pour chaque mode de dégradation. Une fois encore, un excellent article de Dr O'Kane: 
+https://doi.org/10.1038/s41467-025-57968-3    (Une version plus complète de l'article est disponible sur arxiv: arXiv:2311.05482v2)
+
+```
