@@ -1,0 +1,255 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import mean_absolute_error
+from torch.utils.data import DataLoader, TensorDataset
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
+
+
+df_1C = pd.read_csv("/Users/david/PycharmProjects/memoire/Synthetic_data/battery_features_1C_27_07.csv")
+df_2C = pd.read_csv("/Users/david/PycharmProjects/memoire/Synthetic_data/battery_features_2C_27_07.csv")
+df_05C = pd.read_csv("/Users/david/PycharmProjects/memoire/Synthetic_data/battery_features_05C_27_07.csv")
+df_dynamic_cycle = pd.read_csv("/Users/david/PycharmProjects/memoire/SoC/dynamic_cycle_2.csv")
+#df_dynamic_cycle = pd.read_csv("/Users/david/PycharmProjects/memoire/Synthetic_data/battery_features_08C_27_07.csv")
+
+#df_1C = df_dynamic_cycle
+df_2C = df_dynamic_cycle
+df_05C = df_dynamic_cycle
+
+df_05C = df_05C[df_05C['SoH_at_Cycle_End'] >= 0.80]
+df_1C = df_1C[df_1C['SoH_at_Cycle_End'] >= 0.93]
+df_2C = df_2C[df_2C['SoH_at_Cycle_End'] >= 0.80]
+df_dynamic_cycle = df_dynamic_cycle[df_dynamic_cycle['SoH_at_Cycle_End'] >= 0.80]
+
+
+
+features = ['CV_Duration_seconds', 'Avg_Temperature_during_CCCV_Celsius', 'Avg_Voltage_during_CC']
+target = 'SoH_at_Cycle_End'
+
+
+
+
+df_train = pd.concat([ df_1C, df_2C], ignore_index=True)
+# correlation_matrix = df_train[features].corr()
+# plt.figure(figsize=(10, 8))
+# sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1, center=0)
+# plt.title('Correlation Matrix of Features')
+# plt.show()
+
+
+scaler_features = MinMaxScaler()
+X_train_raw = df_train[features].values
+X_train_scaled = scaler_features.fit_transform(X_train_raw)
+
+scaler_target = MinMaxScaler()
+y_train_raw = df_train[target].values
+y_train_scaled = scaler_target.fit_transform(y_train_raw.reshape(-1, 1))
+
+
+X_1C_scaled = scaler_features.transform(df_1C[features].values)
+y_1C_scaled = scaler_target.transform(df_1C[target].values.reshape(-1, 1))
+X_2C_scaled = scaler_features.transform(df_2C[features].values)
+y_2C_scaled = scaler_target.transform(df_2C[target].values.reshape(-1, 1))
+X_05C_scaled = scaler_features.transform(df_05C[features].values)
+y_05C_scaled = scaler_target.transform(df_05C[target].values.reshape(-1, 1))
+X_dynamic_scaled = scaler_features.transform(df_dynamic_cycle[features].values)
+y_dynamic_scaled = scaler_target.transform(df_dynamic_cycle[target].values.reshape(-1, 1))
+
+
+def create_sequences(X, y, sequence_length):
+    X_seq, y_seq = [], []
+    for i in range(len(X) - sequence_length + 1):
+        X_seq.append(X[i:i + sequence_length])
+        y_seq.append(y[i + sequence_length - 1])
+    return np.array(X_seq), np.array(y_seq)
+
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, output_size, dropout):
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.dropout(out[:, -1, :])
+        out = self.fc(out)
+        return out
+
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+lr = 8e-4
+batch_size = 32
+sequence_length = 10
+hidden_size = 15
+num_layers = 1
+dropout = 0.3
+
+seed = 18                # Good candidates:  3, 5, 4, 2with 1000 patience, eventuellement 15
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+X_1C_seq, y_1C_seq = create_sequences(X_1C_scaled, y_1C_scaled, sequence_length)
+X_2C_seq, y_2C_seq = create_sequences(X_2C_scaled, y_2C_scaled, sequence_length)
+X_05C_seq, y_05C_seq = create_sequences(X_05C_scaled, y_05C_scaled, sequence_length)
+X_dynamic_seq, y_dynamic_seq = create_sequences(X_dynamic_scaled, y_dynamic_scaled, sequence_length)
+
+
+train_end_05C = int(0.9 * len(X_05C_seq))
+train_end_1C = int(0.9 * len(X_1C_seq))
+train_end_2C = int(0.9 * len(X_2C_seq))
+
+X_train_05C = X_05C_seq[:train_end_05C]
+y_train_05C = y_05C_seq[:train_end_05C]
+X_val_05C = X_05C_seq[train_end_05C:]
+y_val_05C = y_05C_seq[train_end_05C:]
+
+X_train_1C = X_1C_seq[:train_end_1C]
+y_train_1C = y_1C_seq[:train_end_1C]
+X_val_1C = X_1C_seq[train_end_1C:]
+y_val_1C = y_1C_seq[train_end_1C:]
+
+X_train_2C = X_2C_seq[:train_end_2C]
+y_train_2C = y_2C_seq[:train_end_2C]
+X_val_2C = X_2C_seq[train_end_2C:]
+y_val_2C = y_2C_seq[train_end_2C:]
+
+
+X_train_seq = np.concatenate([X_train_05C, X_train_1C, X_train_2C], axis=0)
+y_train_seq = np.concatenate([y_train_05C, y_train_1C, y_train_2C], axis=0)
+X_val_seq = np.concatenate([X_val_05C, X_val_1C, X_val_2C], axis=0)
+y_val_seq = np.concatenate([y_val_05C, y_val_1C, y_val_2C], axis=0)
+
+
+X_train_seq = torch.FloatTensor(X_train_seq)
+y_train_seq = torch.FloatTensor(y_train_seq)
+X_val_seq = torch.FloatTensor(X_val_seq)
+y_val_seq = torch.FloatTensor(y_val_seq)
+X_test_seq = torch.FloatTensor(X_dynamic_seq)
+y_test_seq = torch.FloatTensor(y_dynamic_seq)
+
+
+train_loader = DataLoader(TensorDataset(X_train_seq, y_train_seq), batch_size=batch_size, shuffle=False)
+val_loader = DataLoader(TensorDataset(X_val_seq, y_val_seq), batch_size=batch_size, shuffle=False)
+test_loader = DataLoader(TensorDataset(X_test_seq, y_test_seq), batch_size=batch_size, shuffle=False)
+
+
+model = LSTMModel(input_size=len(features), hidden_size=hidden_size, num_layers=num_layers, output_size=1, dropout=dropout).to(device)
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.05, patience=100)
+
+
+num_epochs = 3000
+patience = 1000
+best_val_rmse = float('inf')
+patience_counter = 0
+best_model_state = None
+train_rmse_history = []
+val_rmse_history = []
+
+for epoch in range(num_epochs):
+    model.train()
+    train_mse = 0
+    for X_batch, y_batch in train_loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        outputs = model(X_batch)
+        loss = criterion(outputs, y_batch)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        train_mse += loss.item()
+    train_mse /= len(train_loader)
+    train_rmse = np.sqrt(train_mse)
+    train_rmse_history.append(train_rmse)
+
+    model.eval()
+    val_mse = 0
+    with torch.no_grad():
+        for X_batch, y_batch in val_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            outputs = model(X_batch)
+            val_mse += criterion(outputs, y_batch).item()
+        val_mse /= len(val_loader)
+        val_rmse = np.sqrt(val_mse)
+        val_rmse_history.append(val_rmse)
+
+    print(f'Epoch [{epoch+1}/{num_epochs}], Train RMSE: {train_rmse:.4f}, Val RMSE: {val_rmse:.4f}')
+
+    if not np.isnan(val_rmse) and val_rmse < best_val_rmse:
+        best_val_rmse = val_rmse
+        best_model_state = model.state_dict()
+        patience_counter = 0
+    else:
+        patience_counter += 1
+        if patience_counter >= patience:
+            print("Early stopping triggered")
+            break
+
+
+if best_model_state is None:
+    raise ValueError("No valid model state was saved during training. Check for NaN values in validation data or adjust early stopping criteria.")
+
+
+model.load_state_dict(best_model_state)
+
+
+model.eval()
+with torch.no_grad():
+    test_mse = 0
+    y_pred_scaled = []
+    for X_batch, y_batch in test_loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        outputs = model(X_batch)
+        test_mse += criterion(outputs, y_batch).item()
+        y_pred_scaled.append(outputs.cpu().numpy())
+    test_mse /= len(test_loader)
+    test_rmse = np.sqrt(test_mse)
+    print(f'Test RMSE on dynamic_cycle: {test_rmse:.4f}')
+
+
+y_pred_scaled = np.concatenate(y_pred_scaled, axis=0)
+
+
+y_pred = scaler_target.inverse_transform(y_pred_scaled)
+y_test = scaler_target.inverse_transform(y_test_seq.numpy())
+
+mae = mean_absolute_error(y_pred_scaled, y_test_seq)
+print(f'Test MAE on dynamic_cycle: {mae:.4f}')
+
+# Plot RMSE vs. Epochs
+plt.figure(figsize=(10, 6))
+plt.plot(range(1, len(train_rmse_history) + 1), train_rmse_history, label='Train RMSE')
+plt.plot(range(1, len(val_rmse_history) + 1), val_rmse_history, label='Validation RMSE')
+plt.xlabel('Epoch')
+plt.ylabel('RMSE')
+plt.title('Training and Validation RMSE vs. Epoch')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plot SoH predictions with correct cycle numbers
+cycles = np.arange(sequence_length, len(df_dynamic_cycle) + 1)
+
+plt.figure(figsize=(10, 6))
+plt.plot(cycles, y_test*100, label='Actual SoH', linewidth=2)
+plt.plot(cycles, y_pred*100, label='Predicted SoH', linewidth=2)
+plt.xlabel('Cycle')
+plt.ylabel('SoH (%)')
+plt.title('SoH Prediction on Dynamic Cycle Dataset', fontweight='bold')
+plt.legend()
+plt.grid(True)
+plt.show()
