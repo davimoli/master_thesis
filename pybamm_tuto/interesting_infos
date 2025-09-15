@@ -29,6 +29,6 @@ l'article):
 https://doi.org/10.1038/s41467-025-57968-3    (Une version plus complète de l'article est disponible sur arxiv: arXiv:2311.05482v2)
 
 6. Concernant la manière de calculer la solution d'une expérience, il est possible d'analyser et de ne sauvegarder qu'un certain nombre de cycles. Ce qui devient intéressant en ce qui
-concerne la gestion de la mémoire pour les longues simulations. 
+concerne la gestion de la mémoire pour les longues simulations: https://docs.pybamm.org/en/stable/source/examples/notebooks/simulations_and_experiments/simulating-long-experiments.html
 
 ```
